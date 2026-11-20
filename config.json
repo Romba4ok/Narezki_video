@@ -1,0 +1,10 @@
+{
+  "games": [],
+  "top_games": 8,
+  "exclude": ["Just Chatting", "Special Events", "Music", "Slots", "Pools, Hot Tubs, and Beaches", "ASMR", "Sports"],
+  "hours": 24,
+  "min_sec": 15,
+  "languages": [],
+  "per_run": 1,
+  "hashtags": "#twitch #стример #gaming #fyp"
+}
