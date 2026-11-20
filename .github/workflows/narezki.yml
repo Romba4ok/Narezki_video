@@ -32,8 +32,15 @@ jobs:
           path: ~/.cache/huggingface
           key: whisper-small
       - run: python -m pytest -q tests
+      - name: Claude CLI (optional - picks the best clip and writes the hook; without the secret the best score is used)
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          if [ -n "$CLAUDE_CODE_OAUTH_TOKEN" ]; then npm install -g @anthropic-ai/claude-code && claude --version
+          else echo "no CLAUDE_CODE_OAUTH_TOKEN secret: clips are picked by score"; fi
       - name: Clips -> 9:16 -> Buffer
         env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY }}
           CLOUDINARY_CLOUD_NAME: ${{ secrets.CLOUDINARY_CLOUD_NAME }}
           CLOUDINARY_API_KEY: ${{ secrets.CLOUDINARY_API_KEY }}
