@@ -1,13 +1,15 @@
-"""Narezki: top Twitch clips of a game -> 9:16 mp4 -> Buffer (TikTok).   python run.py
-Env: TWITCH_CLIENT_ID/SECRET, BUFFER_API_KEY, CLOUDINARY_CLOUD_NAME/API_KEY/API_SECRET.
+"""Narezki: top clips of the most watched Russian-speaking Twitch channels -> 9:16 mp4 -> Buffer (TikTok).   python run.py
+No Twitch API key: the channel list is refreshed on every run from the TwitchTracker Russian ranking, clips are listed and downloaded with yt-dlp.
+Env: BUFFER_API_KEY, CLOUDINARY_CLOUD_NAME/API_KEY/API_SECRET.
 NAREZKI_BUFFER = plan (default for anything unknown: lists the picks, downloads and sends nothing) | draft | queue | now. NAREZKI_COUNT overrides per_run.
 Dedup: state.json (committed by the workflow) remembers every clip id, posted or failed, so nothing is sent twice."""
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 import requests
@@ -19,38 +21,45 @@ STATE = ROOT / "state.json"
 MODES = ("plan", "draft", "queue", "now")
 
 
-def twitch_clips(cfg, env, now):
-    """Clips of the last cfg.hours from cfg.games (names), or from the cfg.top_games most watched categories right now; most viewed first."""
-    t = requests.post("https://id.twitch.tv/oauth2/token", timeout=30, data={
-        "client_id": env["TWITCH_CLIENT_ID"], "client_secret": env["TWITCH_CLIENT_SECRET"], "grant_type": "client_credentials"})
-    t.raise_for_status()
-    h = {"Client-Id": env["TWITCH_CLIENT_ID"], "Authorization": f"Bearer {t.json()['access_token']}"}
-    api = "https://api.twitch.tv/helix/"
-    if cfg["games"]:
-        games = requests.get(api + "games", headers=h, params=[("name", n) for n in cfg["games"]], timeout=30).json().get("data")
-    else:
-        games = requests.get(api + "games/top", headers=h, params={"first": 50}, timeout=30).json().get("data")
-        games = [g for g in games if g["name"] not in cfg["exclude"]][:cfg["top_games"]]
-    if not games:
-        raise SystemExit("no Twitch categories found: check config.json games")
-    fmt = "%Y-%m-%dT%H:%M:%SZ"
-    out = []
-    for g in games:
-        r = requests.get(api + "clips", headers=h, timeout=30, params={
-            "game_id": g["id"], "first": 20, "started_at": (now - timedelta(hours=cfg["hours"])).strftime(fmt), "ended_at": now.strftime(fmt)})
+def parse_ranking(html):
+    """Channel logins of the TwitchTracker table, in rank order."""
+    return list(dict.fromkeys(re.findall(r'<td>#\d+</td>\s*<td>\s*<a href="/(\w+)"', html)))
+
+
+def channels(cfg):
+    """cfg.channels (manual + fallback) plus the current top of the ranking; blocked words removed.
+    shortcut: if the ranking site blocks the runner (Cloudflare) only cfg.channels is used, upgrade to another ranking source then."""
+    found = []
+    try:
+        r = requests.get(cfg["ranking_url"], headers={"User-Agent": "Mozilla/5.0"}, timeout=30)
         r.raise_for_status()
-        out += [dict(c, game=g["name"]) for c in r.json()["data"]]
-    return sorted(out, key=lambda c: -c["view_count"])
+        found = parse_ranking(r.text)[:cfg["ranking_top"]]
+    except requests.RequestException as e:
+        print(f"ranking unavailable ({str(e)[:80]}), using config channels only")
+    if not found:
+        print("ranking gave no channels, using config channels only")
+    allowed = [c for c in dict.fromkeys(cfg["channels"] + found) if not any(w in c.lower() for w in cfg["block_words"])]
+    print(f"channels ({len(allowed)}): {', '.join(allowed)}")
+    return allowed
+
+
+def list_clips(channel, rng):
+    """Most popular clips of a channel in range 24hr|7d|30d (yt-dlp, flat). A channel without clips or an error gives []."""
+    r = subprocess.run([sys.executable, "-m", "yt_dlp", "-J", "--flat-playlist", "--playlist-end", "10",
+                        f"https://www.twitch.tv/{channel}/clips?filter=clips&range={rng}"],
+                       capture_output=True, text=True, encoding="utf-8", env=dict(os.environ, PYTHONUTF8="1"))
+    if r.returncode:
+        return []
+    return [dict(e, channel=channel) for e in json.loads(r.stdout).get("entries", [])]
 
 
 def pick(clips, seen, cfg, n):
-    ok = [c for c in clips if c["id"] not in seen and c["duration"] >= cfg["min_sec"]
-          and (not cfg["languages"] or c["language"] in cfg["languages"])]
-    return ok[:n]
+    ok = [c for c in clips if c["id"] not in seen and (c.get("duration") or 0) >= cfg["min_sec"] and (c.get("view_count") or 0) >= cfg["min_views"]]
+    return sorted(ok, key=lambda c: -c["view_count"])[:n]
 
 
 def caption(clip, cfg):
-    return f"{clip['title']}\n\n🎮 {clip['broadcaster_name']} · {clip['game']} (Twitch)\n\n{cfg['hashtags']}"[:2200]
+    return f"{clip.get('title') or ''}\n\n🎮 {clip['channel']} (Twitch)\n\n{cfg['hashtags']}"[:2200]
 
 
 def convert(src, dst):
@@ -76,7 +85,11 @@ def main(env=os.environ):
     mode = mode if mode in MODES else "plan"  # a typo must never turn into real publishing
     now = datetime.now(timezone.utc)
     state = json.loads(STATE.read_text(encoding="utf-8")) if STATE.exists() else {}
-    todo = pick(twitch_clips(cfg, env, now), state, cfg, int(env.get("NAREZKI_COUNT") or cfg["per_run"]))
+    chans, todo = channels(cfg), []
+    for rng in cfg["ranges"]:  # the freshest range that still has something new
+        todo = pick([c for ch in chans for c in list_clips(ch, rng)], state, cfg, int(env.get("NAREZKI_COUNT") or cfg["per_run"]))
+        if todo:
+            break
     print(f"mode={mode} picked={len(todo)}")
     failed = 0
     if mode != "plan" and todo:
@@ -84,7 +97,7 @@ def main(env=os.environ):
         ch = buf.tiktok_channel()
         cloud = Cloudinary(env["CLOUDINARY_CLOUD_NAME"], env["CLOUDINARY_API_KEY"], env["CLOUDINARY_API_SECRET"])
     for c in todo:
-        print(f"- {c['id']} {c['game']} {c['view_count']} views {c['duration']}s {c['broadcaster_name']}: {c['title']}")
+        print(f"- {c['id']} {c['channel']} {c['view_count']} views {c['duration']}s: {c.get('title')}")
         if mode == "plan":
             continue
         try:
@@ -92,7 +105,7 @@ def main(env=os.environ):
                 out = Path(d) / "out.mp4"
                 convert(download(c["url"], d), out)
                 url = cloud.upload(out, f"narezki/{c['id']}")
-            state[c["id"]] = {"status": mode, "post_id": buf.create_post(ch["id"], caption(c, cfg), url, mode), "at": now.isoformat(), "title": c["title"]}
+            state[c["id"]] = {"status": mode, "post_id": buf.create_post(ch["id"], caption(c, cfg), url, mode), "at": now.isoformat(), "title": c.get("title")}
         except (BufferError, subprocess.CalledProcessError, OSError, StopIteration) as e:
             failed += 1
             state[c["id"]] = {"status": "error", "error": f"{type(e).__name__}: {str(e)[:150]}", "at": now.isoformat()}  # kept: never auto-retried, a half-done post must not duplicate

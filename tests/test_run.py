@@ -8,20 +8,25 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 import run  # noqa: E402
 
-CFG = {"min_sec": 15, "languages": ["ru"], "hashtags": "#gta6"}
+CFG = {"min_sec": 15, "min_views": 100, "hashtags": "#x"}
 
 
-def clip(i, dur=30, lang="ru", views=1):
-    return {"id": i, "duration": dur, "language": lang, "view_count": views, "title": "t" * 3000, "broadcaster_name": "x", "game": "g"}
+def clip(i, dur=30, views=500):
+    return {"id": i, "duration": dur, "view_count": views, "title": "t" * 3000, "channel": "x"}
 
 
-def test_pick_skips_seen_short_and_other_language():
-    clips = [clip("seen"), clip("short", dur=5), clip("en", lang="en"), clip("a"), clip("b")]
-    assert [c["id"] for c in run.pick(clips, {"seen": {}}, CFG, 1)] == ["a"]
+def test_pick_skips_seen_short_and_unpopular_then_sorts_by_views():
+    clips = [clip("seen"), clip("short", dur=5), clip("low", views=5), clip("a", views=200), clip("b", views=900)]
+    assert [c["id"] for c in run.pick(clips, {"seen": {}}, CFG, 2)] == ["b", "a"]
 
 
 def test_caption_fits_tiktok_limit():
     assert len(run.caption(clip("a"), CFG)) == 2200
+
+
+def test_parse_ranking_keeps_rank_order_and_ignores_menu_links():
+    html = '<a href="/games">g</a><tr><td>#1</td><td> <a href="/honeymad" x>a</a><a href="/honeymad">b</a></td></tr><tr><td>#2</td><td>\n<a href="/strogo">'
+    assert run.parse_ranking(html) == ["honeymad", "strogo"]
 
 
 @pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")
