@@ -60,9 +60,9 @@ def test_choose_validates_claude_answer_and_fills_up_to_n():
 
 def test_nsfw_blocks_exposed_but_allows_covered_and_low_scores():
     d = lambda c, s: [{"class": c, "score": s}]  # noqa: E731
-    assert media.is_nsfw(d("FEMALE_BREAST_EXPOSED", 0.6), 0.45)
-    assert not media.is_nsfw(d("FEMALE_BREAST_COVERED", 0.9), 0.45)
-    assert not media.is_nsfw(d("BUTTOCKS_EXPOSED", 0.3), 0.45)
+    assert media.is_nsfw(d("FEMALE_BREAST_EXPOSED", 0.6), 0.3)
+    assert not media.is_nsfw(d("FEMALE_BREAST_COVERED", 0.9), 0.3)
+    assert not media.is_nsfw(d("BUTTOCKS_EXPOSED", 0.2), 0.3)
 
 
 def test_ass_has_title_channel_and_chunked_subtitles_and_no_ass_injection():

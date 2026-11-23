@@ -13,12 +13,12 @@ def is_nsfw(detections, thr):
     return any(d["class"] in EXPOSED and d["score"] >= thr for d in detections)
 
 
-def nsfw_clip(src, duration, folder, thr, frames=8):
-    """True when any of `frames` evenly spaced frames shows exposed nudity. shortcut: 8 frames can miss a short flash, raise `frames` if it does."""
+def nsfw_clip(src, duration, folder, thr, fps=2):
+    """True when any frame (`fps` per second) shows exposed nudity. shortcut: a flash shorter than 1/fps s can slip through, raise `fps` if it does."""
     from nudenet import NudeDetector
     det = _models.setdefault("nude", NudeDetector())
-    subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(src), "-vf", f"fps={frames / max(duration, 1):.4f},scale=960:-2",
-                    str(Path(folder) / "n%02d.jpg")], check=True)
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(src), "-vf", f"fps={fps},scale=960:-2",
+                    str(Path(folder) / "n%03d.jpg")], check=True)
     return any(is_nsfw(det.detect(str(f)), thr) for f in sorted(Path(folder).glob("n*.jpg")))
 
 

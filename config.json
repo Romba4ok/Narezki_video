@@ -4,7 +4,7 @@
   "channels": ["buster", "evelone2004", "shadowkekw", "deepins02", "bratishkinoff", "egorkreed", "nix", "mokrivskyi"],
   "block_words": ["1win", "fissure", "paragon", "casino", "kazino", "slot", "mellstroy"],
   "bad_title_words": ["18+", "порн", "секс", "sex", "nsfw", "хуй", "хуе", "пизд", "ебан", "ебат", "сиськ", "жопа", "писюл", "пенис", "голая", "голый", "голые", "голых", "голой", "голым", "обнаж", "**", "стриптиз", "strip"],
-  "nsfw_score": 0.45,
+  "nsfw_score": 0.3,
   "language": "ru",
   "whisper_model": "small",
   "ranges": ["24hr", "7d"],
